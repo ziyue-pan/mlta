@@ -35,6 +35,11 @@
 
 using namespace llvm;
 
+Type* __getPointerElementType(Type* ty) {
+	if (ty->isPointerTy())
+		return ty;
+	return ty->getPointerElementType();
+}
 
 //
 // Implementation
@@ -52,10 +57,10 @@ bool MLTA::fuzzyTypeMatch(Type *Ty1, Type *Ty2,
 	if (Ty1 == Ty2)
 		return true;
 
-	while (Ty1->isPointerTy() && Ty2->isPointerTy()) {
-		Ty1 = Ty1->getPointerElementType();
-		Ty2 = Ty2->getPointerElementType();
-	}
+	// while (Ty1->isPointerTy() && Ty2->isPointerTy()) {
+	// 	Ty1 = Ty1->getPointerElementType();
+	// 	Ty2 = Ty2->getPointerElementType();
+	// }
 
 	if (Ty1->isStructTy() && Ty2->isStructTy() &&
 			(Ty1->getStructName().equals(Ty2->getStructName())))
@@ -267,8 +272,8 @@ bool MLTA::isCompositeType(Type *Ty) {
 Type *MLTA::getFuncPtrType(Value *V) {
 	Type *Ty = V->getType();
 	if (PointerType *PTy = dyn_cast<PointerType>(Ty)) {
-		Type *ETy = PTy->getPointerElementType();
-		if (ETy->isFunctionTy())
+		Type *ETy = __getPointerElementType(PTy);
+		if (ETy && ETy->isFunctionTy())
 			return ETy;
 	}
 
@@ -386,9 +391,10 @@ bool MLTA::typeConfineInInitializer(GlobalVariable *GV) {
 				User *OU = dyn_cast<User>(O);
 				LU.push_back(OU);
 				if (GlobalVariable *GO = dyn_cast<GlobalVariable>(OU)) {
-					Type *Ty = POTy->getPointerElementType();
+					// Type *Ty = POTy->getPointerElementType();
+					Type *Ty = __getPointerElementType(POTy);
 					// FIXME: take it as a confinement instead of a cap
-					if (Ty->isStructTy())
+					if (Ty && Ty->isStructTy())
 						typeCapSet.insert(typeHash(Ty));
 				}
 			}
@@ -608,11 +614,11 @@ bool MLTA::typePropInFunction(Function *F) {
 		Type *FromTy = Cast->getOperand(0)->getType();
 		Type *ToTy = Cast->getType();
 		if (FromTy->isPointerTy() && ToTy->isPointerTy()) {
-			Type *EFromTy = FromTy->getPointerElementType();
-			Type *EToTy = ToTy->getPointerElementType();
-			if (EFromTy->isStructTy() && EToTy->isStructTy()) {
-				//propagateType(Cast, EFromTy, -1);
-			}
+			// Type *EFromTy = FromTy->getPointerElementType();
+			// Type *EToTy = ToTy->getPointerElementType();
+			// if (EFromTy->isStructTy() && EToTy->isStructTy()) {
+			// 	//propagateType(Cast, EFromTy, -1);
+			// }
 		}
 	}
 
@@ -643,7 +649,7 @@ void MLTA::collectAliasStructPtr(Function *F) {
 			if (!ToTy->isPointerTy())
 				continue;
 			
-			if (!isCompositeType(ToTy->getPointerElementType()))
+			if (!isCompositeType(__getPointerElementType(ToTy)))
 				continue;
 
 			if (AliasMap.find(FromV) != AliasMap.end()) {
@@ -888,12 +894,12 @@ Type *MLTA::getBaseType(Value *V, set<Value *> &Visited) {
 	// The value itself is a pointer to a composite type
 	else if (Ty->isPointerTy()) {
 
-		Type *ETy = Ty->getPointerElementType();
+		Type *ETy = __getPointerElementType(Ty);
 		if (isCompositeType(ETy)) {
 			return ETy;
 		}
 		else if (Value *BV = recoverBaseType(V))
-			return BV->getType()->getPointerElementType();
+			return __getPointerElementType(BV->getType());
 	}
 
 	if (BitCastOperator *BCO = 
@@ -956,7 +962,7 @@ bool MLTA::getGEPLayerTypes(GEPOperator *GEP, list<typeidx_t> &TyList) {
 		Instruction *I = dyn_cast<Instruction>(PO);
 		Value *BV = recoverBaseType(PO);
 		if (BV) {
-			ETy = BV->getType()->getPointerElementType();
+			ETy = __getPointerElementType(BV->getType());
 			APInt Offset (ConstI->getBitWidth(), 
 					ConstI->getZExtValue());
 			Type *BaseTy = ETy;

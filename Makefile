@@ -22,7 +22,7 @@ build_analyzer_func = \
 			cmake ${1}	\
 				-DCMAKE_BUILD_TYPE=Build \
 				-DLLVM_ENABLE_ASSERTIONS=ON \
-				-DCMAKE_CXX_FLAGS_BUILD="-std=c++14 -fpic -fno-rtti -g" \
+				-DCMAKE_CXX_FLAGS_BUILD="-std=c++17 -fpic -fno-rtti -g" \
 		&& make -j${NPROC})
 
 

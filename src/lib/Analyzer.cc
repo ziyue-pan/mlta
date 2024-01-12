@@ -152,6 +152,7 @@ int main(int argc, char **argv) {
 		if (M == NULL) {
 			OP << argv[0] << ": error loading file '"
 				<< InputFilenames[i] << "'\n";
+			Err.print(argv[0], errs());
 			continue;
 		}
 

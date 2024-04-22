@@ -1,5 +1,5 @@
 CUR_DIR = $(shell pwd)
-LLVM_BUILD := ${CUR_DIR}/llvm-project/prefix
+LLVM_BUILD := /home/ziyue/llvm-project-16/build
 ANALYZER_DIR := ${CUR_DIR}/src
 ANALYZER_BUILD := ${CUR_DIR}/build
 
@@ -22,7 +22,7 @@ build_analyzer_func = \
 			cmake ${1}	\
 				-DCMAKE_BUILD_TYPE=Build \
 				-DLLVM_ENABLE_ASSERTIONS=ON \
-				-DCMAKE_CXX_FLAGS_BUILD="-std=c++14 -fpic -fno-rtti -g" \
+				-DCMAKE_CXX_FLAGS_BUILD="-std=c++17 -fpic -fno-rtti -g" \
 		&& make -j${NPROC})
 
 

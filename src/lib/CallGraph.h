@@ -4,6 +4,7 @@
 #include "Analyzer.h"
 #include "MLTA.h"
 #include "Config.h"
+#include "TypeGraph.hpp"
 
 class CallGraphPass : 
 	public virtual IterativeModulePass, public virtual MLTA {
@@ -25,7 +26,7 @@ class CallGraphPass :
 		//
 		// Methods
 		//
-		void doMLTA(Function *F);
+		void doMLTA(TypeGraph *tg, Function *F);
 
 
 	public:

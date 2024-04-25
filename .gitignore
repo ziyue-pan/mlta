@@ -4,3 +4,9 @@ processLinuxTrace.py
 tags
 llvm-project
 *.swp
+CMakeFiles
+.cache
+cmake_install.cmake
+compile_commands.json
+src/Makefile
+CMakeCache.txt

@@ -37,7 +37,7 @@ string getFileName(DILocation *Loc, DISubprogram *SP) {
 		FN = string(SOURCE_CODE_PATH) + "/" + FN;
 	} 
 	else {
-		OP << "== Warning: please specify the path of linux source.";
+		// OP << "== Warning: please specify the path of linux source.";
 	}
 	return FN;
 }

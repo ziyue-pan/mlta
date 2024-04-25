@@ -29,6 +29,7 @@
 
 #include "Common.h"
 #include "CallGraph.h"
+#include "TypeAnalyzer.hpp"
 
 #include <map> 
 #include <vector> 
@@ -40,7 +41,7 @@ using namespace llvm;
 // Implementation
 //
 
-void CallGraphPass::doMLTA(Function *F) {
+void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 
   // Unroll loops
 #ifdef UNROLL_LOOP_ONCE
@@ -64,7 +65,7 @@ void CallGraphPass::doMLTA(Function *F) {
 
 				// Multi-layer type matching
 				if (ENABLE_MLTA > 1) {
-					findCalleesWithMLTA(CI, *FS);
+					findCalleesWithMLTA(tg, CI, *FS);
 				}
 				// Fuzzy type matching
 				else if (ENABLE_MLTA == 0) {
@@ -73,7 +74,7 @@ void CallGraphPass::doMLTA(Function *F) {
 							!= MatchedICallTypeMap.end())
 						*FS = MatchedICallTypeMap[CIH];
 					else {
-						findCalleesWithType(CI, *FS);
+						findCalleesWithType(tg, CI, *FS);
 						MatchedICallTypeMap[CIH] = *FS;
 					}
 				}
@@ -281,6 +282,10 @@ bool CallGraphPass::doFinalization(Module *M) {
 
 bool CallGraphPass::doModulePass(Module *M) {
 
+	OP << "[DEBUG] reached here\n";
+	auto analyzer = new TypeAnalyzer(M);
+	auto tg = analyzer->analyze();
+
 	++ MIdx;
 
 	//
@@ -311,7 +316,7 @@ bool CallGraphPass::doModulePass(Module *M) {
 		if (F->isDeclaration())
 			continue;
 
-		doMLTA(F);
+		doMLTA(tg, F);
 	}
 
 	return false;

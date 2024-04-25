@@ -90,7 +90,7 @@ bool MLTA::fuzzyTypeMatch(Type *Ty1, Type *Ty2,
 // long as the number and type of parameters of a function matches
 // with the ones of the callsite, we say the function is a possible
 // target of this call.
-void MLTA::findCalleesWithType(CallInst *CI, FuncSet &S) {
+void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 
 	if (CI->isInlineAsm())
 		return;
@@ -1038,7 +1038,7 @@ bool MLTA::getGEPLayerTypes(GEPOperator *GEP, list<typeidx_t> &TyList) {
 				if (PointerType *PTy 
 						= dyn_cast<PointerType>(BCO->getType())) {
 
-					Type *ToTy = PTy->getPointerElementType();
+					Type *ToTy = __getPointerElementType(PTy);
 					if (Ty0 == ToTy)
 						TmpTyList.push_front(typeidx_c(ETy, 0));
 				}
@@ -1265,7 +1265,7 @@ bool MLTA::getTargetsWithLayerType(size_t TyHash, int Idx,
 }
 
 // The API for MLTA: it returns functions for an indirect call
-bool MLTA::findCalleesWithMLTA(CallInst *CI, 
+bool MLTA::findCalleesWithMLTA(TypeGraph * tg, CallInst *CI, 
 		FuncSet &FS) {
 
 	// Initial set: first-layer results

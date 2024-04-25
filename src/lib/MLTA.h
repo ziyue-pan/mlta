@@ -3,6 +3,7 @@
 
 #include "Analyzer.h"
 #include "Config.h"
+#include "TypeGraph.hpp"
 #include "llvm/IR/Operator.h"
 
 typedef pair<Type *, int> typeidx_t;
@@ -108,8 +109,8 @@ class MLTA {
 		// API functions
 		////////////////////////////////////////////////////////////////
 		// Use type-based analysis to find targets of indirect calls
-		void findCalleesWithType(CallInst*, FuncSet&);
-		bool findCalleesWithMLTA(CallInst *CI, FuncSet &FS);
+		void findCalleesWithType(TypeGraph* tg, CallInst*, FuncSet&);
+		bool findCalleesWithMLTA(TypeGraph* tg, CallInst *CI, FuncSet &FS);
 		bool getTargetsWithLayerType(size_t TyHash, int Idx, 
 				FuncSet &FS);
 

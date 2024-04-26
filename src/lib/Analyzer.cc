@@ -45,7 +45,7 @@ cl::opt<int> MLTA(
     "mlta",
   cl::desc("Multi-layer type analysis for refining indirect-call \
     targets"),
-  cl::NotHidden, cl::init(2));
+  cl::NotHidden, cl::init(0));
 
 GlobalContext GlobalCtx;
 

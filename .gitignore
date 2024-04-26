@@ -4,3 +4,5 @@ processLinuxTrace.py
 tags
 llvm-project
 *.swp
+.cache
+compile_commands.json

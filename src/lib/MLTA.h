@@ -70,7 +70,7 @@ class MLTA {
 		////////////////////////////////////////////////////////////////
 		// Type-related basic functions
 		////////////////////////////////////////////////////////////////
-		bool fuzzyTypeMatch(Type *Ty1, Type *Ty2, Module *M1, Module *M2);
+		bool fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2, Module *M1, Module *M2);
 
 		void escapeType(Value *V);
 		void propagateType(Value *ToV, Type *FromTy, int Idx = -1);

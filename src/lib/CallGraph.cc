@@ -42,7 +42,6 @@ using namespace llvm;
 //
 
 void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
-
   // Unroll loops
 #ifdef UNROLL_LOOP_ONCE
   unrollLoops(F);
@@ -62,7 +61,6 @@ void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 
 			// Indirect call
 			if (CI->isIndirectCall()) {
-
 				// Multi-layer type matching
 				if (ENABLE_MLTA > 1) {
 					findCalleesWithMLTA(tg, CI, *FS);
@@ -113,10 +111,6 @@ void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 #ifdef MAP_CALLER_TO_CALLEE
 					Ctx->Callers[CF].insert(CI);
 #endif
-				}
-				// InlineAsm
-				else {
-					// TODO: handle InlineAsm functions
 				}
 			}
 
@@ -282,7 +276,6 @@ bool CallGraphPass::doFinalization(Module *M) {
 
 bool CallGraphPass::doModulePass(Module *M) {
 
-	OP << "[DEBUG] reached here\n";
 	auto analyzer = new TypeAnalyzer(M);
 	auto tg = analyzer->analyze();
 
@@ -302,8 +295,6 @@ bool CallGraphPass::doModulePass(Module *M) {
 		assert(GTy->isPointerTy());
 
 	}
-	if (MIdx == Ctx->Modules.size()) {
-	}
 
 	//
 	// Process functions
@@ -318,6 +309,18 @@ bool CallGraphPass::doModulePass(Module *M) {
 
 		doMLTA(tg, F);
 	}
+
+	OP << "[TypeCopilot] # of icall: " << MatchedICallTypeMap.size() << "\n";
+	int total_target = 0;
+	set<Function *> unique_target_after;
+	for (auto &CI : MatchedICallTypeMap) {
+		total_target += CI.second.size();
+		for (auto F : CI.second) {
+			unique_target_after.insert(F);
+		}
+	}
+	OP << "[TypeCopilot] # of total icall targets: " << unique_target_after.size() << "\n";
+	OP << "[TypeCopilot] avg. # of icall targets: " << total_target / MatchedICallTypeMap.size() << "\n";
 
 	return false;
 }

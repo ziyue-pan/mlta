@@ -51,8 +51,10 @@ pair<size_t, int> hashidx_c(size_t Hash, int Idx) {
 	return make_pair(Hash, Idx);
 }
 
-bool MLTA::fuzzyTypeMatch(Type *Ty1, Type *Ty2, 
+bool MLTA::fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2, 
 		Module *M1, Module *M2) {
+	if (!Ty1 || !Ty2)
+		return false;
 
 	if (Ty1 == Ty2)
 		return true;
@@ -62,25 +64,25 @@ bool MLTA::fuzzyTypeMatch(Type *Ty1, Type *Ty2,
 	// 	Ty2 = Ty2->getPointerElementType();
 	// }
 
-	if (Ty1->isStructTy() && Ty2->isStructTy() &&
-			(Ty1->getStructName().equals(Ty2->getStructName())))
+	if (Ty1->equalByStruct(Ty2))
 		return true;
-	if (Ty1->isIntegerTy() && Ty2->isIntegerTy() &&
-			Ty1->getIntegerBitWidth() == Ty2->getIntegerBitWidth())
+	if (Ty1->equalbyInteger(Ty2))
+		return true;
+	if (Ty1->equalByPointer(Ty2))
 		return true;
 	// TODO: more types to be supported.
 
 	// Make the type analysis conservative: assume general
 	// pointers, i.e., "void *" and "char *", are equivalent to 
 	// any pointer type and integer type.
-	if (
-			(Ty1 == Int8PtrTy[M1] &&
-			 (Ty2->isPointerTy() || Ty2 == IntPtrTy[M2])) 
-			||
-			(Ty2 == Int8PtrTy[M1] &&
-			 (Ty1->isPointerTy() || Ty1 == IntPtrTy[M2]))
-		 )
-		return true;
+	// if (
+	// 		(Ty1 == Int8PtrTy[M1] &&
+	// 		 (Ty2->isPointerTy() || Ty2 == IntPtrTy[M2])) 
+	// 		||
+	// 		(Ty2 == Int8PtrTy[M1] &&
+	// 		 (Ty1->isPointerTy() || Ty1 == IntPtrTy[M2]))
+	// 	 )
+	// 	return true;
 
 	return false;
 }
@@ -121,12 +123,6 @@ void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 			continue;
 		}
 
-		// Types completely match
-		if (callHash(CI) == funcHash(F)) {
-			S.insert(F);
-			continue;
-		}
-
 		Module *CalleeM = F->getParent();
 		Module *CallerM = CI->getFunction()->getParent();
 
@@ -138,9 +134,10 @@ void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 				FI != FE; ++FI, ++AI) {
 			// Check type mis-matches.
 			// Get defined type on callee side.
-			Type *DefinedTy = FI->getType();
+			TypeSet *DefinedTy = tg->get(F, FI);
 			// Get actual type on caller side.
-			Type *ActualTy = (*AI)->getType();
+			Function *scope = CI->getParent()->getParent();
+			TypeSet *ActualTy = tg->get(scope, *AI);
 			
 			if (!fuzzyTypeMatch(DefinedTy, ActualTy, CalleeM, CallerM)) {
 				Matched = false;
@@ -150,8 +147,10 @@ void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 
 		// If args are matched, further check return types
 		if (Matched) {
-			Type *RTy1 = F->getReturnType();
-			Type *RTy2 = CI->getType();
+			TypeSet *RTy1 = tg->get(nullptr, F);
+			Function *scope = CI->getParent()->getParent();
+			TypeSet *RTy2 = tg->get(scope, CI);
+
 			if (!fuzzyTypeMatch(RTy1, RTy2, CalleeM, CallerM)) {
 				Matched = false;
 			}
@@ -1400,400 +1399,5 @@ bool MLTA::findCalleesWithMLTA(TypeGraph * tg, CallInst *CI,
 		Ctx->NumFirstLayerTypeCalls += 1;
 	}
 
-#if 0
-	FuncSet FSBase = Ctx->sigFuncsMap[callHash(CI)];
-	saveCalleesInfo(CI, FSBase, false);
-	saveCalleesInfo(CI, FSBase, true);
-#endif
-
 	return true;
 }
-
-
-
-
-
-////////////////////////////////////////////////////////////////
-// Deprecated code
-////////////////////////////////////////////////////////////////
-#if 0
-	list<Value *>LV;
-	LV.push_back(V);
-
-	while (!LV.empty()) {
-		Value *CV = LV.front();
-		LV.pop_front();
-
-		if (GEPOperator *GEP = dyn_cast<GEPOperator>(CV)) {
-			int Idx;
-			if (Type *BTy = getBaseType(CV, Idx)) {
-				// Add the tyep to the chain
-				Chain.push_back(typeidx_c(BTy, Idx));
-				LV.push_back(GEP->getPointerOperand());
-			}
-			else
-				continue;
-		}
-		else if (BitCastOperator *BCO = 
-				dyn_cast<BitCastOperator>(CV)) {
-			int Idx;
-			if (Type *BTy = getBaseType(CV, Idx)) {
-				// Add the tyep to the chain
-				Chain.push_back(typeidx_c(BTy, Idx));
-			}
-			else
-				continue;
-		}
-		else if (LoadInst *LI = dyn_cast<LoadInst>(CV)) {
-			LV.push_back(LI->getPointerOperand());
-		}
-		// Rcognizing escaping cases
-		else if (isa<Argument>(CV) && CV->getType()->isPointerTy()){
-
-			Complete = false;
-		}
-		else {
-			for (auto U : CV->users()) {
-				if (StoreInst *SI = dyn_cast<StoreInst>(U)) {
-					if (CV == SI->getPointerOperand())
-						Complete = false;
-				}
-			}
-			// TODO: other cases like store?
-		}
-	}
-
-#endif
-
-
-#if 0
-	list<Value *>LV;
-	LV.push_back(V);
-
-	while (!LV.empty()) {
-		Value *CV = LV.front();
-		LV.pop_front();
-
-		if (GEPOperator *GEP = dyn_cast<GEPOperator>(CV)) {
-			int Idx;
-			if (Type *BTy = getBaseType(CV, Idx)) {
-				typeFuncsMap[typeIdxHash(BTy, Idx)].insert(F);
-				LV.push_back(GEP->getPointerOperand());
-			}
-			else
-				continue;
-		}
-		else if (LoadInst *LI = dyn_cast<LoadInst>(CV)) {
-			LV.push_back(LI->getPointerOperand());
-		}
-	}
-
-bool MLTA::typeConfineInStore(StoreInst *SI) {
-	
-	Value *PO = SI->getPointerOperand();
-	Value *VO = SI->getValueOperand();
-
-#if 1
-	//
-	// Special handling for storing VTable pointers
-	//
-	if (BitCastOperator *BCO = dyn_cast<BitCastOperator>(VO)) {
-		if (GEPOperator *GEP = 
-				dyn_cast<GEPOperator>(BCO->getOperand(0))) {
-			if (Value *VT = 
-					getVTable(GEP->getPointerOperand())) {
-
-				int Idx; Value *NextV;
-				if (Type *BTy = nextLayerBaseType(PO, Idx, NextV)) {
-					FuncSet FS = VTableFuncsMap[VT];
-					typeIdxFuncsMap[typeHash(BTy)][0].insert(FS.begin(), 
-							FS.end());
-				}
-			}
-		}
-	}
-
-#endif
-
-	///////////////////////////////////////////////////
-
-	int IdxP;
-	Value *NextV;
-	Type *PBTy = nextLayerBaseType(PO, IdxP, NextV);
-	// Not targeting a composite-type, skip
-	if (!PBTy)
-		return false;
-
-	
-	// Case 1: The value operand is a function
-	Function *F = dyn_cast<Function>(VO);
-	if (F) {
-		typeIdxFuncsMap[typeHash(PBTy)][IdxP].insert(F);
-		confineTargetFunction(PO, F);
-		return true;
-	}
-
-	if (isa<ConstantPointerNull>(VO))
-		return false;
-
-	Type *VTy = VO->getType();
-	// Cast 2: value-based store
-	// A composite-type object is stored
-	// The target set will be expanded to include the ones from the
-	// value operaond
-	if (isCompositeType(VTy)) {
-		propagateType(PO, VTy);
-		return true;
-	}
-	// Case 3: reference (i.e., pointer)-based store
-	// Store something to a field of a composite-type object
-	else if (VTy->isPointerTy()) {
-
-		int IdxV;
-		// The value operand is a pointer to a composite-type object
-		// This case confines the targets through another layer
-		//if (Type *VBTy = nextLayerBaseType(VO, IdxV, NextV)) {
-		if (Type *VBTy = getBaseType(VO, IdxV)) {
-
-			//typeConfineMap[typeIdxHash(PBTy,
-			//		IdxP)].insert(typeHash(VBTy)); 
-			propagateType(PO, VBTy);
-
-			return true;
-		}
-		else {
-			if (isa<BitCastOperator>(VO) && !isa<CastInst>(VO)) {
-				Value * FV = 
-					dyn_cast<BitCastOperator>(VO)->getOperand(0);
-				if (Function *F = dyn_cast<Function>(FV)) {
-					typeIdxFuncsMap[typeHash(PBTy)][IdxP].insert(F);
-					confineTargetFunction(PO, F);
-					return true;
-				}
-			}
-			// TODO: The type is escaping?
-			// Example: mm/mempool.c +188: pool->free = free_fn;
-			// free_fn is a function pointer from an function
-			// argument
-			escapeType(PBTy, IdxP);
-			return false;
-		}
-	}
-	else {
-		// Unrecognized cases
-		assert(1);
-	}
-
-	return false;
-}
-
-#if 0
-		if (PointerType *PTy = dyn_cast<PointerType>(UTy)) {
-
-			Type *ETy = PTy->getPointerElementType();
-			if (ETy->isFunctionTy()) {
-				FuncOperands.insert(U);
-				continue;
-			}
-		}
-
-		for (auto oi = U->op_begin(), oe = U->op_end(); 
-				oi != oe; ++oi) {
-
-			Value *O = *oi;
-			Type *OTy = O->getType();
-
-			if (PointerType *POTy = dyn_cast<PointerType>(OTy)) {
-
-				if (isa<ConstantPointerNull>(O))
-					continue;
-
-				Type *ETy = POTy->getPointerElementType();
-
-				if (ETy->isFunctionTy()) {
-					FuncOperands.insert(O);
-					continue;
-				}
-
-				else if (BitCastOperator *CO =
-						dyn_cast<BitCastOperator>(O)) {
-
-					User *OU = dyn_cast<User>(CO->getOperand(0));
-					LU.push_back(OU);
-					continue;
-				}
-				else if (GEPOperator *GO =
-						dyn_cast<GEPOperator>(O)){
-
-					User *OU = dyn_cast<User>(GO->getOperand(0));
-					LU.push_back(OU);
-					continue;
-				}
-				else if (GlobalVariable *GO = dyn_cast<GlobalVariable>(O)) {
-					// TODO
-				}
-				else {
-					// ?
-				}
-			}
-			else {
-				User *OU = dyn_cast<User>(O);
-				if (OU)
-					LU.push_back(OU);
-			}
-		}
-
-#endif
-#if 0 // Handling VTable pointers in C++
-			FunctionType *FTy =
-        dyn_cast<FunctionType>(PETy->getPointerElementType());
-      if (!FTy)
-        return NULL;
-
-      if (FTy->getNumParams() == 0)
-        return NULL;
-      // the first parameter should be the object itself
-      Type *ParamTy = FTy->getParamType(0);
-      if (!ParamTy->isPointerTy())
-        return NULL;
-
-      StructType *STy =
-        dyn_cast<StructType>(ParamTy->getPointerElementType());
-      // "class" is treated as a struct
-      if (STy && STy->getName().startswith("class.")) {
-        User::op_iterator ie = GEP->idx_end();
-        ConstantInt *ConstI = dyn_cast<ConstantInt>((--ie)->get());
-        //Idx = ConstI->getSExtValue();
-        // assume the idx is always 0
-        Idx = 0;
-        return STy;
-      }
-#endif
-
-#if 0
-bool MLTA::typePropWithCast(User *Cast) {
-
-	// If a function address is ever cast to another type and stored
-	// to a composite type, the escaping analysis will capture the
-	// composite type and discard it
-	
-	Value *From = Cast->getOperand(0);
-	Value *To = Cast; 
-
-	//int IdxTo;
-	//Value *NextV;
-	//Type *ToBTy = nextLayerBaseType(To, IdxTo, NextV);
-	//Type *ToBTy = getBaseType(To, IdxTo);
-	Type *ToBTy = To->getType();
-	
-	// Not targeting a composite-type, skip
-	if (!isCompositeType(ToBTy)) {
-		
-		set<Value *>Visited;
-		Type *FromBTy = getBaseType(From, Visited);
-		if (FromBTy) {
-			// Conservatively say the type is escaping
-			for (User *U : To->users()) {
-				if (CallInst *CI = dyn_cast<CallInst>(U)) {
-					// FIXME: use getCalledOperand instead
-					Function *F = CI->getCalledFunction();
-					if (F && !F->onlyReadsMemory())
-						escapeType(FromBTy);
-				}
-			}
-		}
-
-		return false;
-	}
-
-	Type *FromTy = From->getType();
-	if (isCompositeType(FromTy)) {
-		propagateType(To, FromTy);
-		return true;
-	}
-	else if (FromTy->isPointerTy()) {
-
-		set<Value *>Visited;
-		Type *FromBTy = getBaseType(From, Visited);
-		// Expand
-		if (FromBTy) {
-			propagateType(To, FromBTy);
-			return true;
-		}
-		else {
-			// "newed" object will always be cast to the class type
-			// from a general type like i8*, so do not take it as an
-			// escaping case
-			// A tricky analysis to identify "new" call
-			if (CallInst *CI = dyn_cast<CallInst>(From)) {
-				// FIXME: use getCalledOperand instead
-				Function *F = CI->getCalledFunction();
-				if (F && F->getName() == "_Znwm")
-					return true;
-			}
-			
-			// Escape
-			escapeType(ToBTy);
-			return false;
-		}
-	}
-	else {
-		assert(1);
-	}
-
-	return false;
-}
-#endif
-#if 0
-	//Type *ETy = dyn_cast<PointerTy>(Ty)->getPointerElementType();
-
-	// Possible cases: (1) pointer to a composite type, (2) GEP
-	// Case 1: GetElementPtrInst or GEPOperator
-	if (GEPOperator *GEP = dyn_cast<GEPOperator>(V)) {
-
-		Type *PTy = GEP->getPointerOperand()->getType();
-		Type *PETy = PTy->getPointerElementType();
-		if (isCompositeType(PETy) && GEP->hasAllConstantIndices()) {
-			User::op_iterator ie = GEP->idx_end();
-			ConstantInt *ConstI = dyn_cast<ConstantInt>((--ie)->get());
-			Idx = ConstI->getSExtValue();
-
-			return PETy;
-		}
-		// In case the pointer points to an "array" of function
-		// pointers---likely vtable pointer
-		// TODO: requires a reliable recognition
-		else if (PETy->isPointerTy() && GEP->hasAllConstantIndices()) {
-
-			FunctionType *FTy =
-				dyn_cast<FunctionType>(PETy->getPointerElementType());
-			if (!FTy)
-				return NULL;
-
-			if (FTy->getNumParams() == 0)
-				return NULL;
-			// the first parameter should be the object itself
-			Type *ParamTy = FTy->getParamType(0);
-			if (!ParamTy->isPointerTy())
-				return NULL;
-
-			StructType *STy =
-				dyn_cast<StructType>(ParamTy->getPointerElementType());
-			// "class" is treated as a struct
-			if (STy && STy->getName().startswith("class.")) {
-				User::op_iterator ie = GEP->idx_end();
-				ConstantInt *ConstI = dyn_cast<ConstantInt>((--ie)->get());
-				//Idx = ConstI->getSExtValue();
-				// assume the idx is always 0
-				Idx = 0;
-				return STy;
-			}
-			return NULL;
-		}
-		else {
-
-			return NULL;
-		}
-	}
-#endif
-#endif

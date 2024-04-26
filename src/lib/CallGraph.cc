@@ -314,6 +314,18 @@ bool CallGraphPass::doModulePass(Module *M) {
 		doMLTA(F);
 	}
 
+	OP << "[TypeCopilot] # of icall: " << MatchedICallTypeMap.size() << "\n";
+	int total_target;
+	set<Function *> unique_target;
+	for (auto &CI : MatchedICallTypeMap) {
+		total_target += CI.second.size();
+		for (auto F : CI.second) {
+			unique_target.insert(F);
+		}
+	}
+	OP << "[TypeCopilot] # of total icall targets: " << unique_target.size() << "\n";
+	OP << "[TypeCopilot] avg. # of icall targets: " << total_target / MatchedICallTypeMap.size() << "\n";
+
 	return false;
 }
 

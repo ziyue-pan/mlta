@@ -53,7 +53,6 @@ pair<size_t, int> hashidx_c(size_t Hash, int Idx) {
 
 bool MLTA::fuzzyTypeMatch(Type *Ty1, Type *Ty2, 
 		Module *M1, Module *M2) {
-
 	if (Ty1 == Ty2)
 		return true;
 
@@ -120,12 +119,6 @@ void MLTA::findCalleesWithType(CallInst *CI, FuncSet &S) {
 		}
 
 		if (F->isIntrinsic()) {
-			continue;
-		}
-
-		// Types completely match
-		if (callHash(CI) == funcHash(F)) {
-			S.insert(F);
 			continue;
 		}
 

@@ -1,7 +1,5 @@
 #pragma once
 
-#include "TypeGraph.hpp"
-
 #include <llvm/ADT/SmallVector.h>
 #include <llvm/BinaryFormat/Dwarf.h>
 #include <llvm/IR/DebugInfo.h>
@@ -15,164 +13,56 @@
 #include <llvm/Support/Casting.h>
 
 #include <map>
+#include <regex>
 #include <string>
 #include <utility>
+
+#include "TypeGraph.hpp"
+#include "TypeHelper.hpp"
 
 using namespace llvm;
 using namespace std;
 
-/// Helper class for TypeGraph
-class TypeHelper {
-  private:
-    // drop struct layout
-    void dropLayout(string &type) {
-        if (type.find("\%struct.") == 0 || type.find("\%union.") == 0) {
-            type = type.substr(0, type.find(" "));
-        }
-    }
-
-    // drop array size
-    void dropArray(string &type) {
-        if (type.find("[") == 0) {
-            auto pos = type.find(" ") + 3;
-            type = type.substr(pos, type.size() - pos - 1);
-
-            if (type.find("[") == 0)
-                dropArray(type);
-
-            if (!isOpaque(type))
-                type += "*";
-        }
-    }
-
-  public:
-    /// get the name of a type
-    inline string getTypeName(Type *type) {
-        string str;
-        raw_string_ostream rso(str);
-        type->print(rso);
-
-        // TODO add hook to adjust type
-        dropArray(str);
-        dropLayout(str);
-
-        return str;
-    }
-
-    /// check if a type is an opaque pointer
-    bool isOpaque(string &type) { return type == "ptr"; }
-    bool isOpaque(set<string> &typeset) { return typeset.count("ptr"); }
-    bool isOpaque(Type *type) { return getTypeName(type) == "ptr"; }
-
-    // check if a type is ptr to opaque pointer
-    bool isPtrToOpaque(string &type) {
-        return type == "ptr*" || type == "ptr**";
-    }
-    bool isPtrToOpaque(set<string> &typeset) {
-        return typeset.count("ptr*") || typeset.count("ptr**");
-    }
-
-    string getReference(Type *type) {
-        auto str = getTypeName(type);
-
-        if (isOpaque(str)) {
-            return str;
-        }
-        return str + "*";
-    }
-
-    string getReference(string &type) {
-        if (isOpaque(type)) {
-            return type;
-        }
-        return type + "*";
-    }
-
-    bool canFlow(string &type) { return !type.empty() && !isOpaque(type); }
-
-    bool canFlow(TypeSet *typeset) {
-        if (!typeset)
-            return false;
-        return !typeset->empty() && !typeset->isOpaque();
-    }
-
-    /// count total number of instructions and number of opaque pointers
-    void count(Module *module, TypeGraph *tg) {
-        long total = 0, opaque = 0;
-
-        for (auto &global : module->globals()) {
-            total++;
-            if (tg->isOpaque(nullptr, &global)) {
-                opaque++;
-            }
-        }
-
-        for (auto &func : *module) {
-            for (auto &basic_block : func) {
-                for (auto &inst : basic_block) {
-                    // skip store inst
-                    if (auto store = dyn_cast_or_null<StoreInst>(&inst)) {
-                        continue;
-                    }
-
-                    total++;
-                    if (tg->isOpaque(&func, &inst)) {
-                        opaque++;
-                    }
-                }
-            }
-        }
-
-        errs() << "total: " << total << ", opaque: " << opaque << "\n";
-    }
-
-    // TODO remove this after debugging
-    void dumpOpaque(Module *module, TypeGraph *tg) {
-        vector<string> libFuncs{
-            "gettext",          "fopen",          "calloc",
-            "localtime",        "strchr",         "gmtime_r",
-            "malloc",           "__ctype_b_loc",  "reallocarray",
-            "__errno_location", "getenv",         "textdomain",
-            "setlocale",        "bindtextdomain", "realloc",
-            "nl_langinfo"};
-
-        for (auto typeMap : tg->getAllMap()) {
-            for (auto &[key, value] : *typeMap) {
-                if (value->isOpaque()) {
-                    bool isLibFunc = false;
-                    for (auto libFunc : libFuncs) {
-                        // declare
-                        if (key->getName().contains(libFunc)) {
-                            isLibFunc = true;
-                            break;
-                        }
-                    }
-                    if (isLibFunc) {
-                        continue;
-                    }
-
-                    errs() << "[INFO] opaque value:\n";
-                    key->dump();
-
-                    continue;
-
-                    if (auto *inst = dyn_cast_or_null<Instruction>(key)) {
-                        errs() << "operands:\n";
-                        for (auto &operand : inst->operands()) {
-                            operand->dump();
-                        }
-                    }
-
-                    errs() << "users:\n";
-                    for (auto user : key->users()) {
-                        user->dump();
-                    }
-                    errs() << "\n";
-                }
-            }
-        }
-    }
+map<string, string> type_trans_map = {
+    {"bool", "i1"},           {"short", "i16"},
+    {"char", "i8"},           {"int", "i32"},
+    {"long", "i64"},          {"long long", "i64"},
+    {"unsigned char", "i8"},  {"unsigned short", "i16"},
+    {"unsigned long", "i64"}, {"unsigned long long", "i64"},
+    {"unsigned int", "i32"},
 };
+string di_to_ir_type(string &di_type) {
+    string ir_type = di_type;
+
+    // trim the ending multiple *
+    int ptr_level = 0;
+    while (ir_type.back() == '*') {
+        ir_type.pop_back();
+        ptr_level++;
+    }
+
+    // general types, in the table
+    auto iter = type_trans_map.find(ir_type);
+    if (iter != type_trans_map.end()) {
+        ir_type = iter->second;
+    } else {
+        // di_type starts with "struct"
+        if (ir_type.find("struct") == 0) {
+            ir_type = "\%struct." + ir_type.substr(7);
+        } else if (ir_type.find("enum") == 0) {
+            ir_type = "i32";
+        }
+    }
+
+    ir_type += string(ptr_level, '*');
+    return ir_type;
+}
+
+// trim suffixing digits from ir types
+string trim_ir_suffix(string &ir_type) {
+    regex pattern(R"((%struct\.[a-zA-Z_]\w*)\.\d+(\*?))");
+    return regex_replace(ir_type, pattern, "$1$2");
+}
 
 class LLVMHelper {
   public:
@@ -180,7 +70,7 @@ class LLVMHelper {
     virtual void initialize(Module *module, TypeGraph *tg) = 0;
 };
 
-/// Helper function for LLVM migration instructions
+/// Helper class for LLVM migration instructions
 class MigrationHelper : public LLVMHelper {
   public:
     void initialize(Module *module, TypeGraph *tg) {
@@ -193,13 +83,19 @@ class MigrationHelper : public LLVMHelper {
 
         // initialize insts
         for (auto &func : *module) {
+            for (auto &arg : func.args()) {
+                Value *value = dyn_cast<Value>(&arg);
+                auto type = tyHelper.getTypeName(value->getType());
+                tg->put(&func, value, type);
+            }
+
             for (auto &basic_block : func) {
                 for (auto &inst : basic_block) {
                     auto type = getType(inst);
 
                     // get value
                     Value *value = dyn_cast<Value>(&inst);
-                    if (auto store = dyn_cast_or_null<StoreInst>(&inst)) {
+                    if (auto store = dyn_cast<StoreInst>(&inst)) {
                         value = store->getValueOperand();
                     }
 
@@ -214,27 +110,27 @@ class MigrationHelper : public LLVMHelper {
             auto type = func.getFunctionType();
             auto retType = type->getReturnType();
             Value *funcValue = dyn_cast<Value>(&func);
-            tg->put(nullptr, funcValue, tyHelper.getTypeName(retType));
+            tg->put(nullptr, funcValue, tyHelper.getTypeName(retType), true);
         }
     }
 
     string getType(Instruction &inst) {
         auto type = inst.getType();
-        if (auto *load = dyn_cast_or_null<LoadInst>(&inst)) {
+        if (auto *load = dyn_cast<LoadInst>(&inst)) {
             type = load->getType();
         }
-        if (auto *store = dyn_cast_or_null<StoreInst>(&inst)) {
+        if (auto *store = dyn_cast<StoreInst>(&inst)) {
             type = store->getValueOperand()->getType();
         }
 
         // handle gep instruction
-        // if (auto* gep = dyn_cast_or_null<GetElementPtrInst>(&inst)) {
+        // if (auto* gep = dyn_cast<GetElementPtrInst>(&inst)) {
         //     type = gep->getSourceElementType();
         //     return getTypeName(type) + "*";
         // }
 
         // handle alloca instruction
-        if (auto *alloca = dyn_cast_or_null<AllocaInst>(&inst)) {
+        if (auto *alloca = dyn_cast<AllocaInst>(&inst)) {
             type = alloca->getAllocatedType();
 
             if (!tyHelper.isOpaque(type))
@@ -242,7 +138,7 @@ class MigrationHelper : public LLVMHelper {
         }
 
         // handle call instruction
-        if (auto *call = dyn_cast_or_null<CallInst>(&inst)) {
+        if (auto *call = dyn_cast<CallInst>(&inst)) {
             type = call->getFunctionType();
 
             // trim parameters' type by erasing parantheses
@@ -258,7 +154,10 @@ class MigrationHelper : public LLVMHelper {
 
 class DebugInfoHelper : public LLVMHelper {
   private:
-    map<StructType *, DIType *> diTypeMap;
+    const bool RESOLVE_TYPEDEF = true;
+
+    map<StructType *, DIType *> structMap;
+    map<Value *, vector<DILocalVariable *>> diLocalMap;
 
   public:
     void initialize(Module *module, TypeGraph *tg) {
@@ -274,24 +173,23 @@ class DebugInfoHelper : public LLVMHelper {
             structName.consume_front("struct.");
             for (auto type : finder.types()) {
                 // typedef
-                if (auto *derived = dyn_cast_or_null<DIDerivedType>(type)) {
+                if (auto *derived = dyn_cast<DIDerivedType>(type)) {
                     if (derived->getTag() == dwarf::DW_TAG_typedef) {
                         if (derived->getName().equals(structName)) {
-                            diTypeMap.insert({s, derived->getBaseType()});
+                            structMap.insert({s, derived->getBaseType()});
                             break;
                         }
                     }
                 }
                 // struct
-                else if (auto *composite =
-                             dyn_cast_or_null<DICompositeType>(type)) {
+                else if (auto *composite = dyn_cast<DICompositeType>(type)) {
                     if (composite->getTag() == dwarf::DW_TAG_structure_type) {
                         if (composite->getName().equals(structName)) {
                             // empty elements, skip
                             if (composite->getElements().empty())
                                 continue;
 
-                            diTypeMap.insert({s, composite});
+                            structMap.insert({s, composite});
                             break;
                         }
                     }
@@ -304,13 +202,22 @@ class DebugInfoHelper : public LLVMHelper {
             global.getDebugInfo(di_global_exps);
 
             if (di_global_exps.empty()) {
-                // FIXME tg->put(nullptr, &global, "ptr");
                 continue;
             }
 
             for (auto di_global_exp : di_global_exps) {
                 auto di_global = di_global_exp->getVariable();
-                tg->put(nullptr, &global, getDITypeName(di_global->getType()));
+                auto di_type_name = getDITypeName(di_global->getType()) + "*";
+                tg->put(nullptr, &global, di_to_ir_type(di_type_name));
+            }
+        }
+
+        // parse di local variables
+        for (auto &F : *module) {
+            for (auto &BB : F) {
+                for (auto &I : BB) {
+                    parseDILocalVar(I, diLocalMap);
+                }
             }
         }
 
@@ -320,17 +227,21 @@ class DebugInfoHelper : public LLVMHelper {
 
                     // get value
                     Value *value = dyn_cast<Value>(&inst);
-                    if (auto store = dyn_cast_or_null<StoreInst>(&inst)) {
+                    if (auto store = dyn_cast<StoreInst>(&inst)) {
                         value = store->getValueOperand();
                     }
 
-                    // alloca adds one more level of ptr
-                    if (auto di_local = getDILocalVar(inst)) {
-                        tg->put(&func, value,
-                                getDITypeName(di_local->getType()));
-                    } else {
-                        // FIXME no debug info, default to opaque pointer
-                        // tg->put(&func, value, "ptr");
+                    if (diLocalMap.find(value) != diLocalMap.end()) {
+                        for (auto di_local : diLocalMap[value]) {
+                            auto di_type_name =
+                                getDITypeName(di_local->getType());
+
+                            if (AllocaInst *alloca =
+                                    dyn_cast<AllocaInst>(value)) {
+                                di_type_name += "*";
+                            }
+                            tg->put(&func, value, di_to_ir_type(di_type_name));
+                        }
                     }
                 }
             }
@@ -346,13 +257,15 @@ class DebugInfoHelper : public LLVMHelper {
             if (!subprogram) {
                 auto type = func.getFunctionType();
                 auto retType = type->getReturnType();
-                tg->put(nullptr, funcValue, tyHelper.getTypeName(retType));
+                tg->put(nullptr, funcValue, tyHelper.getTypeName(retType),
+                        true);
             } else {
                 auto *subroutinetype = subprogram->getType();
                 auto typearray = subroutinetype->getTypeArray();
 
                 // process return type
-                tg->put(nullptr, funcValue, getDITypeName(typearray[0]));
+                auto di_type_name = getDITypeName(typearray[0]);
+                tg->put(nullptr, funcValue, di_to_ir_type(di_type_name), true);
 
                 // process parameters
                 for (int i = 1; i < typearray.size(); ++i) {
@@ -362,8 +275,59 @@ class DebugInfoHelper : public LLVMHelper {
                         continue;
 
                     if (i - 1 < func.arg_size()) { // avoid overflow
+                        // type from DI subprogram
                         auto param = func.getArg(i - 1);
-                        tg->put(&func, param, getDITypeName(type));
+                        auto di_type_name = getDITypeName(type);
+                        tg->put(&func, param, di_to_ir_type(di_type_name));
+
+                        // type from DI local var
+                        if (diLocalMap.find(param) != diLocalMap.end()) {
+                            for (auto di_local : diLocalMap[param]) {
+                                auto di_type_name =
+                                    getDITypeName(di_local->getType());
+                                tg->put(&func, param,
+                                        di_to_ir_type(di_type_name));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    void parseDILocalVar(Instruction &inst,
+                         map<Value *, vector<DILocalVariable *>> &diLocalMap) {
+        // check if is call inst
+        if (auto *call = dyn_cast<CallInst>(&inst)) {
+            auto call_func = call->getCalledFunction();
+            if (!call_func)
+                return;
+            if (call_func->arg_size() < 2)
+                return;
+
+            // check invoked function is intrinsic llvm debug function
+            if (call_func && call_func->isIntrinsic() &&
+                call_func->getName().startswith("llvm.dbg")) {
+
+                auto val = call->getArgOperand(0);
+                MetadataAsValue *mtv0 = dyn_cast_or_null<MetadataAsValue>(val);
+                Metadata *mt0 = mtv0->getMetadata();
+                ValueAsMetadata *vmt = dyn_cast_or_null<ValueAsMetadata>(mt0);
+                if (!vmt)
+                    return;
+                Value *real_val = vmt->getValue();
+
+                // get the second argument, which stores `DILocalVariable`
+                if (auto arg = call->getArgOperand(1)) {
+                    auto metadata =
+                        dyn_cast<MetadataAsValue>(arg)->getMetadata();
+                    DILocalVariable *di_value =
+                        dyn_cast<DILocalVariable>(metadata);
+                    // one value can map to multiple values, so save in vectors
+                    if (diLocalMap.find(real_val) != diLocalMap.end()) {
+                        diLocalMap[real_val].push_back(di_value);
+                    } else {
+                        diLocalMap[real_val] = {di_value};
                     }
                 }
             }
@@ -379,36 +343,28 @@ class DebugInfoHelper : public LLVMHelper {
         return false;
     }
 
-    DILocalVariable *getDILocalVar(Instruction &inst) {
-        DILocalVariable *local = nullptr;
-
-        // check if is call inst
-        if (auto *call = dyn_cast_or_null<CallInst>(&inst)) {
-
-            auto call_func = call->getCalledFunction();
-
-            // check invoked function is intrinsic llvm debug function
-            if (call_func && call_func->isIntrinsic() &&
-                call_func->getName().starts_with("llvm.dbg.declare")) {
-
-                // get the second argument, which stores `DILocalVariable`
-                if (auto arg = call->getArgOperand(1)) {
-                    auto metadata =
-                        dyn_cast<MetadataAsValue>(arg)->getMetadata();
-                    local = dyn_cast_or_null<DILocalVariable>(metadata);
-                }
-            }
-        }
-
-        return local;
-    }
-
-    // DIType *getDIStructType(StructType *structType) { return pos->second; }
-
     string getDIStructField(StructType *structType, uint64_t index) {
         // iterate over all DICompositeType
-        auto pos = diTypeMap.find(structType);
-        if (pos == diTypeMap.end()) {
+        auto pos = structMap.find(structType);
+
+        // if (pos == structMap.end()) {
+        //     // try to search by struct name
+        //     if (!structType->hasName()) {
+        //         return "";
+        //     }
+
+        //     auto structName = structType->getName().str();
+        //     for (auto it = structMap.begin(); it != structMap.end(); it++) {
+        //         errs() << "[DBG] it: " << it->first << "\n";
+        //         auto itName = it->first->getName().str();
+        //         if (itName == structName) {
+        //             pos = it;
+        //             break;
+        //         }
+        //     }
+        // }
+
+        if (pos == structMap.end()) {
             return "";
         }
 
@@ -420,7 +376,8 @@ class DebugInfoHelper : public LLVMHelper {
 
         auto element = elements[index];
         if (auto *derivedType = dyn_cast<DIDerivedType>(element)) {
-            return getDITypeName(derivedType->getBaseType());
+            auto baseTypeName = getDITypeName(derivedType->getBaseType());
+            return di_to_ir_type(baseTypeName);
         }
         return "";
     }
@@ -442,7 +399,7 @@ class DebugInfoHelper : public LLVMHelper {
             name = "enum " + ditype->getName().str();
             break;
         case dwarf::DW_TAG_array_type: {
-            auto *composite = dyn_cast_or_null<DICompositeType>(ditype);
+            auto *composite = dyn_cast<DICompositeType>(ditype);
             auto basename = composite->getBaseType() != nullptr
                                 ? getDITypeName(composite->getBaseType())
                                 : "void";
@@ -450,32 +407,45 @@ class DebugInfoHelper : public LLVMHelper {
             int subrangeCount = 0;
             auto elements = composite->getElements(); // get elements
             for (auto element : elements) {
-                if (auto *sub = dyn_cast_or_null<DISubrange>(element))
+                if (auto *sub = dyn_cast<DISubrange>(element))
                     subrangeCount++;
             }
             name =
                 basename + string(subrangeCount, '*'); // multi-dimension array
         } break;
         case dwarf::DW_TAG_pointer_type: {
-            auto *derived = dyn_cast_or_null<DIDerivedType>(ditype);
+            auto *derived = dyn_cast<DIDerivedType>(ditype);
             auto basename = derived->getBaseType() != nullptr
                                 ? getDITypeName(derived->getBaseType())
                                 : "void";
-            if (basename == "void")
-                name = "ptr";
-            else
-                name = basename + "*";
+            // if (basename == "void")
+            //     name = "ptr";
+            // else
+            name = basename + "*";
         } break;
         case dwarf::DW_TAG_structure_type:
             name = "struct " + ditype->getName().str();
             break;
         case dwarf::DW_TAG_typedef:
-            name = ditype->getName().str();
+            if (RESOLVE_TYPEDEF) {
+                auto *derived = dyn_cast<DIDerivedType>(ditype);
+                auto basetype = derived->getBaseType();
+                if (basetype) {
+                    name = getDITypeName(basetype);
+                    if (name == "") {
+                        name = ditype->getName().str();
+                    }
+                } else {
+                    name = ditype->getName().str();
+                }
+            } else {
+                name = ditype->getName().str();
+            }
             break;
         case dwarf::DW_TAG_volatile_type:
         case dwarf::DW_TAG_restrict_type:
         case dwarf::DW_TAG_const_type: {
-            auto *derived = dyn_cast_or_null<DIDerivedType>(ditype);
+            auto *derived = dyn_cast<DIDerivedType>(ditype);
             auto basename = derived->getBaseType() != nullptr
                                 ? getDITypeName(derived->getBaseType())
                                 : "void";
@@ -485,7 +455,7 @@ class DebugInfoHelper : public LLVMHelper {
             name = "union " + ditype->getName().str();
         } break;
         case dwarf::DW_TAG_subroutine_type: {
-            auto *subroutine = dyn_cast_or_null<DISubroutineType>(ditype);
+            auto *subroutine = dyn_cast<DISubroutineType>(ditype);
             name = subroutine->getName();
         } break;
         default:
@@ -498,6 +468,7 @@ class DebugInfoHelper : public LLVMHelper {
 };
 
 class TBAAHelper : public LLVMHelper {
+
   public:
     void initialize(Module *module, TypeGraph *tg) {
         for (auto &func : *module) {
@@ -506,33 +477,108 @@ class TBAAHelper : public LLVMHelper {
                     // handle TBAA
                     auto aamd = inst.getAAMetadata();
 
-                    if (aamd.TBAA) {
-                        auto *tbaa = aamd.TBAA;
-                        auto tbaaTypeName = parseTypeName(tbaa);
+                    if (aamd && aamd.TBAA) {
+                        // get tbaa type name
+                        auto tbaa_type = getTBAAType(aamd.TBAA, func, inst);
 
-                        if (tbaaTypeName.empty())
+                        // skip empty type
+                        if (tbaa_type.empty()) {
                             continue;
+                        }
 
-                        // handle store ptr
-                        if (auto *store = dyn_cast_or_null<StoreInst>(&inst)) {
-                            auto *ptr = store->getPointerOperand();
-                            tg->put(&func, ptr, tbaaTypeName);
-                        } else if (auto *load =
-                                       dyn_cast_or_null<LoadInst>(&inst)) {
-                            auto *ptr = load->getPointerOperand();
-                            tg->put(&func, &inst, tbaaTypeName);
+                        Value *ld_st_ptr = nullptr; // tbaa annotated pointer
+
+                        // bond to load or store instruction
+                        if (LoadInst *load = dyn_cast<LoadInst>(&inst)) {
+                            ld_st_ptr = load->getPointerOperand();
+                        } else if (StoreInst *store =
+                                       dyn_cast<StoreInst>(&inst)) {
+                            ld_st_ptr = store->getPointerOperand();
+                        }
+
+                        if (ld_st_ptr) {
+                            if (tbaa_type != "any pointer" && !isScalarType(tbaa_type)) {
+                                tbaa_type = "%struct." + tbaa_type;
+                            }
+
+                            // if is scala type
+                            if (isScalarType(tbaa_type)) {
+                                tg->put(&func, ld_st_ptr, tbaa_type);
+                            } else if (GlobalValue *gv =
+                                           dyn_cast<GlobalValue>(ld_st_ptr)) {
+                                tg->put(nullptr, gv, tbaa_type);
+                            } else if (GetElementPtrInst *gep =
+                                           dyn_cast<GetElementPtrInst>(
+                                               ld_st_ptr)) {
+                                tg->put(&func, gep->getPointerOperand(),
+                                        tbaa_type);
+                            } else if (LoadInst *load =
+                                           dyn_cast<LoadInst>(ld_st_ptr)) {
+                                tg->put(&func, load->getPointerOperand(),
+                                        tbaa_type);
+                            } else if (StoreInst *store =
+                                           dyn_cast<StoreInst>(ld_st_ptr)) {
+                                tg->put(&func, store->getPointerOperand(),
+                                        tbaa_type);
+                            }
                         }
                     }
+
+                    // if (aamd && aamd.TBAA) {
+                    //     auto *tbaa = aamd.TBAA;
+                    //     auto tbaaTypeName = parseTypeName(tbaa);
+
+                    //     if (tbaaTypeName.empty())
+                    //         continue;
+
+                    //     auto trans_type_name = di_to_ir_type(tbaaTypeName);
+                    //     // handle store ptr
+                    //     if (auto *store = dyn_cast<StoreInst>(&inst)) {
+                    //         auto *ptr = store->getPointerOperand();
+                    //         tg->put(&func, ptr, trans_type_name);
+                    //     } else if (auto *load = dyn_cast<LoadInst>(&inst)) {
+                    //         auto *ptr = load->getPointerOperand();
+                    //         tg->put(&func, ptr, trans_type_name);
+                    //     }
+                    // }
                 }
             }
         }
     }
 
+    bool isScalarType(string &type) {
+        return type == "i1" || type == "i8" || type == "i16" || type == "i32" ||
+               type == "i64" || type == "float" || type == "double";
+    }
+
+    string getTBAAType(MDNode *tbaa, Function &func, Instruction &inst) {
+        // get first field
+        auto *baseTy = dyn_cast<MDNode>(tbaa->getOperand(0));
+
+        // get baseTy's type name
+        if (!baseTy) {
+            return "";
+        }
+
+        auto *baseTyName = dyn_cast<MDString>(baseTy->getOperand(0));
+        if (!baseTyName) {
+            return "";
+        }
+
+        auto baseTypeName = baseTyName->getString().str();
+
+        if (baseTypeName.empty() || baseTypeName == "omnipotent char") {
+            return "";
+        }
+
+        return di_to_ir_type(baseTypeName);
+    }
+
     string getTypeName(MDNode *tbaaType) {
-        auto *baseTyName = dyn_cast_or_null<MDString>(tbaaType->getOperand(0));
+        auto *baseTyName = dyn_cast<MDString>(tbaaType->getOperand(0));
 
         // if accessTy is an omnipotent char
-        auto *accessTy = dyn_cast_or_null<MDNode>(tbaaType->getOperand(1));
+        auto *accessTy = dyn_cast<MDNode>(tbaaType->getOperand(1));
         if (isOmnipotentChar(accessTy)) {
             return baseTyName->getString().str();
         }
@@ -543,8 +589,8 @@ class TBAAHelper : public LLVMHelper {
     // parse TBAA type name
     string parseTypeName(MDNode *tbaa) {
 
-        auto *baseTy = dyn_cast_or_null<MDNode>(tbaa->getOperand(0));
-        auto *accessTy = dyn_cast_or_null<MDNode>(tbaa->getOperand(1));
+        auto *baseTy = dyn_cast<MDNode>(tbaa->getOperand(0));
+        auto *accessTy = dyn_cast<MDNode>(tbaa->getOperand(1));
 
         if (isOmnipotentChar(accessTy))
             return "";
@@ -557,24 +603,24 @@ class TBAAHelper : public LLVMHelper {
     }
 
     bool isOmnipotentChar(MDNode *tbaa) {
-        auto *accessTyName = dyn_cast_or_null<MDString>(tbaa->getOperand(0));
+        auto *accessTyName = dyn_cast<MDString>(tbaa->getOperand(0));
         return accessTyName->getString().equals("omnipotent char");
     }
 };
 
 class CombHelper : public LLVMHelper {
-    // TODO combine migration and debug info (and maybe TBAA)
   private:
     MigrationHelper *migHelper;
     DebugInfoHelper *diHelper;
-    map<StructType *, DIType *> diTypeMap;
+    map<StructType *, DIType *> structMap;
+    map<Value *, vector<DILocalVariable *>> diLocalMap;
 
   public:
     void initialize(Module *module, TypeGraph *tg) {
         // create the inner helpers
         migHelper = new MigrationHelper();
         diHelper = new DebugInfoHelper();
-        
+
         // map structure type to DIType
         DebugInfoFinder finder;
         finder.processModule(*module);
@@ -587,24 +633,23 @@ class CombHelper : public LLVMHelper {
             structName.consume_front("struct.");
             for (auto type : finder.types()) {
                 // typedef
-                if (auto *derived = dyn_cast_or_null<DIDerivedType>(type)) {
+                if (auto *derived = dyn_cast<DIDerivedType>(type)) {
                     if (derived->getTag() == dwarf::DW_TAG_typedef) {
                         if (derived->getName().equals(structName)) {
-                            diTypeMap.insert({s, derived->getBaseType()});
+                            structMap.insert({s, derived->getBaseType()});
                             break;
                         }
                     }
                 }
                 // struct
-                else if (auto *composite =
-                             dyn_cast_or_null<DICompositeType>(type)) {
+                else if (auto *composite = dyn_cast<DICompositeType>(type)) {
                     if (composite->getTag() == dwarf::DW_TAG_structure_type) {
                         if (composite->getName().equals(structName)) {
                             // empty elements, skip
                             if (composite->getElements().empty())
                                 continue;
 
-                            diTypeMap.insert({s, composite});
+                            structMap.insert({s, composite});
                             break;
                         }
                     }
@@ -624,8 +669,18 @@ class CombHelper : public LLVMHelper {
 
             for (auto di_global_exp : di_global_exps) {
                 auto di_global = di_global_exp->getVariable();
-                tg->put(nullptr, &global,
-                        diHelper->getDITypeName(di_global->getType()));
+                auto di_type_name =
+                    diHelper->getDITypeName(di_global->getType()) + "*";
+                tg->put(nullptr, &global, di_to_ir_type(di_type_name));
+            }
+        }
+
+        // parse di local variables
+        for (auto &F : *module) {
+            for (auto &BB : F) {
+                for (auto &I : BB) {
+                    diHelper->parseDILocalVar(I, diLocalMap);
+                }
             }
         }
 
@@ -635,19 +690,27 @@ class CombHelper : public LLVMHelper {
 
                     // get value
                     Value *value = dyn_cast<Value>(&inst);
-                    if (auto store = dyn_cast_or_null<StoreInst>(&inst)) {
+                    if (auto store = dyn_cast<StoreInst>(&inst)) {
                         value = store->getValueOperand();
                     }
 
-                    // alloca adds one more level of ptr
-                    if (auto di_local = diHelper->getDILocalVar(inst)) {
-                        tg->put(&func, value,
-                                diHelper->getDITypeName(di_local->getType()));
-                    } else {
-                        // no debug info, default to migration instruction 
-                        auto type = migHelper->getType(inst);
-                        tg->put(&func, value, type);
+                    // type from DI local var
+                    if (diLocalMap.find(value) != diLocalMap.end()) {
+                        for (auto di_local : diLocalMap[value]) {
+                            auto di_type_name =
+                                diHelper->getDITypeName(di_local->getType());
+
+                            // handle alloca instruction
+                            if (AllocaInst *alloca =
+                                    dyn_cast<AllocaInst>(value)) {
+                                di_type_name += "*";
+                            }
+                            tg->put(&func, value, di_to_ir_type(di_type_name));
+                        }
                     }
+                    // no debug info, default to migration instruction
+                    auto type = migHelper->getType(inst);
+                    tg->put(&func, value, type);
                 }
             }
         }
@@ -662,14 +725,15 @@ class CombHelper : public LLVMHelper {
             if (!subprogram) {
                 auto type = func.getFunctionType();
                 auto retType = type->getReturnType();
-                tg->put(nullptr, funcValue, tyHelper.getTypeName(retType));
+                tg->put(nullptr, funcValue, tyHelper.getTypeName(retType),
+                        true);
             } else {
                 auto *subroutinetype = subprogram->getType();
                 auto typearray = subroutinetype->getTypeArray();
 
                 // process return type
-                tg->put(nullptr, funcValue,
-                        diHelper->getDITypeName(typearray[0]));
+                auto di_type_name = diHelper->getDITypeName(typearray[0]);
+                tg->put(nullptr, funcValue, di_to_ir_type(di_type_name), true);
 
                 // process parameters
                 for (int i = 1; i < typearray.size(); ++i) {
@@ -679,15 +743,64 @@ class CombHelper : public LLVMHelper {
                         continue;
 
                     if (i - 1 < func.arg_size()) { // avoid overflow
+                        // type from DI subprogram
                         auto param = func.getArg(i - 1);
-                        tg->put(&func, param, diHelper->getDITypeName(type));
+                        auto di_type_name = diHelper->getDITypeName(type);
+                        tg->put(&func, param, di_to_ir_type(di_type_name));
+
+                        // type from DI local var
+                        if (diLocalMap.find(param) != diLocalMap.end()) {
+                            for (auto di_local : diLocalMap[param]) {
+                                auto di_type_name = diHelper->getDITypeName(
+                                    di_local->getType());
+                                tg->put(&func, param,
+                                        di_to_ir_type(di_type_name));
+                            }
+                        }
                     }
                 }
             }
         }
     }
 
-    bool hasDebugInfo(Module &M) {
-        return diHelper->hasDebugInfo(M);
+    bool hasDebugInfo(Module &M) { return diHelper->hasDebugInfo(M); }
+
+    string getDIStructField(StructType *structType, uint64_t index) {
+        // iterate over all DICompositeType
+        auto pos = structMap.find(structType);
+
+        // if (pos == structMap.end()) {
+        //     // try to search by struct name
+        //     if (!structType->hasName()) {
+        //         return "";
+        //     }
+
+        //     auto structName = structType->getName().str();
+        //     for (auto it = structMap.begin(); it != structMap.end(); it++) {
+        //         auto itName = it->first->getName().str();
+        //         if (itName == structName) {
+        //             pos = it;
+        //             break;
+        //         }
+        //     }
+        // }
+
+        if (pos == structMap.end()) {
+            return "";
+        }
+
+        auto diStructType = static_cast<DICompositeType *>(pos->second);
+        auto elements = diStructType->getElements();
+        if (index >= elements.size()) {
+            return "";
+        }
+
+        auto element = elements[index];
+        if (auto *derivedType = dyn_cast<DIDerivedType>(element)) {
+            auto baseTypeName =
+                diHelper->getDITypeName(derivedType->getBaseType());
+            return di_to_ir_type(baseTypeName);
+        }
+        return "";
     }
 };

@@ -2,10 +2,14 @@
 
 #include <llvm/ADT/StringExtras.h>
 #include <llvm/IR/Function.h>
+#include <llvm/IR/Instructions.h>
+#include <llvm/IR/Module.h>
 #include <llvm/IR/Type.h>
 #include <llvm/IR/Value.h>
 #include <llvm/Support/Casting.h>
 
+#include <iomanip>
+#include <iostream>
 #include <map>
 #include <set>
 
@@ -34,11 +38,6 @@ class TypeGraph {
     using TypeMap = map<Value *, TypeSet *>;
 
   private:
-    TypeMap globalMap;
-    map<Function *, TypeMap *> localMap;
-
-    // FIXME add filter, support for more accurate type information
-    const bool UNARY = false;
     const bool DEBUG = false;
 
     bool canFlow(string type) { return !type.empty() && type != "ptr"; }
@@ -65,6 +64,21 @@ class TypeGraph {
     }
 
   public:
+    TypeMap globalMap;
+    map<Function *, TypeMap *> localMap;
+
+    ~TypeGraph() {
+        for (auto &pair : globalMap) {
+            delete pair.second;
+        }
+        for (auto &pair : localMap) {
+            for (auto &pair2 : *pair.second) {
+                delete pair2.second;
+            }
+            delete pair.second;
+        }
+    }
+
     /// get the type of a value
     TypeSet *get(Function *scope, Value *key) {
         // first check local type
@@ -83,19 +97,23 @@ class TypeGraph {
         return nullptr;
     }
 
-    // FIXME add filter, support for more accurate type information
     /// merge multiple types into one value's type
-    void put(Function *scope, Value *key, TypeSet *value) {
+    // return true if the type is updated, false if not changed
+    bool put(Function *scope, Value *key, TypeSet *value, bool isFunc = false) {
         // no value, quick return
         if (!value)
-            return;
+            return false;
+
+        TypeSet *to_add = new TypeSet();
+        to_add->insert(value);
 
         // find existing type
         auto old = get(scope, key);
 
         if (old) {
             // filter out ptr* type
-            if (DEBUG && value->count("ptr**")) {
+            // FIXME delete stale debug stuff
+            if (DEBUG && to_add->count("ptr**")) {
                 key->dump();
                 errs() << "current type: ";
                 old->dump();
@@ -103,25 +121,40 @@ class TypeGraph {
                 print_stacktrace();
             }
 
-            // filter out type conflict
-            // FIXME old and value should define a new operator
-            if (UNARY && !old->empty() && !old->count("ptr") && old != value) {
-                errs() << "[ERR] type conflict when put ";
-                value->dump();
-                errs() << " to ";
-                key->dump();
-                errs() << "current type: ";
-                old->dump();
-                errs() << "\n";
-                // print_stacktrace();
+            // filter out subtype problems
+            for (auto &type : to_add->getTypes()) {
+                // if old contains type.reference(), then skip
+                if (old->count(type + "*")) {
+                    to_add->erase(type);
+                } else if (type.back() == '*' &&
+                           old->count(type.substr(0, type.size() - 1))) {
+                    // if old contains type.dereference(), then skip
+                    to_add->erase(type);
+                }
             }
         }
 
         if (old == nullptr)
             old = new TypeSet();
 
+        if (to_add->empty()) {
+            delete to_add;
+            return false;
+        }
+
+        // check if old == value
+        if (old->equals(to_add)) {
+            delete to_add;
+            return false;
+        }
+
         // update type
-        old->insert(value);
+        old->insert(to_add);
+        delete to_add;
+
+        if (isFunc)
+            old->isFunc = true;
+
         if (scope) { // test scope
             auto it = localMap.find(scope);
             if (it != localMap.end()) // update local map
@@ -133,11 +166,12 @@ class TypeGraph {
         } else { // no scope, update global map
             globalMap[key] = old;
         }
+
+        return true;
     }
 
-    // FIXME add filter, support for more accurate type information
     /// merge a single type into one value's type
-    void put(Function *scope, Value *key, string value) {
+    bool put(Function *scope, Value *key, string value, bool isFunc = false) {
         // find existing type
         auto old = get(scope, key);
 
@@ -151,25 +185,30 @@ class TypeGraph {
                 print_stacktrace();
             }
 
-            // filter out type conflict
-            if (UNARY && value != "ptr" && !old->empty() && !old->hasPtr() &&
-                !old->count(value)) {
-                errs() << "[ERR] type conflict when put " << value << " to ";
-                key->dump();
-                errs() << "current type: ";
-                old->dump();
-                errs() << "\n";
+            // filter out subtype problems
+            if (old->count(value + "*")) {
+                return false;
+            } else if (value.back() == '*' &&
+                       old->count(value.substr(0, value.size() - 1))) {
+                return false;
             }
         }
 
         if (old == nullptr)
             old = new TypeSet();
 
+        // check if old == value
+        if (old->count(value))
+            return false;
+
         // update type
         old->insert(value);
 
+        if (isFunc)
+            old->isFunc = true;
+
         // should not be a global value
-        if (!dyn_cast_or_null<GlobalValue>(key) && scope) {
+        if (!dyn_cast<GlobalValue>(key) && scope) {
             auto it = localMap.find(scope);
             if (it != localMap.end()) // update local map
                 (*it->second)[key] = old;
@@ -180,6 +219,8 @@ class TypeGraph {
         } else { // no scope, update global map
             globalMap[key] = old;
         }
+
+        return true;
     }
 
     /// check if a value is an opaque pointer
@@ -197,6 +238,11 @@ class TypeGraph {
             return ret;
 
         for (auto &type : old->getTypes()) {
+            // if type ends with "**", skip ***p
+            if (type.size() > 2 && type.substr(type.size() - 2) == "**") {
+                continue;
+            }
+
             if (type != "ptr")
                 ret->insert(type + "*");
         }
@@ -223,8 +269,7 @@ class TypeGraph {
 
     /// print the type of a value
     void dumpType(Function *scope, Value *key, TypeSet *value) {
-        // filter out internal values
-        if (!key->hasName() || isInternal(key))
+        if (!key->hasName())
             return;
 
         if (scope)
@@ -252,6 +297,68 @@ class TypeGraph {
                 dumpType(pair.first, pair2.first, pair2.second);
             }
         }
+    }
+
+    void coverage(Module *module) {
+        int total_cnt = 0;
+        int cover_cnt = 0;
+
+        // globals
+        for (auto &global : module->globals()) {
+            // skip if global is a function
+            // if (global.getType()->isFunctionTy())
+            //     continue;
+            total_cnt++;
+
+            Value *v = dyn_cast<Value>(&global);
+            auto type = get(nullptr, v);
+            if (type && !type->isOpaque())
+                cover_cnt++;
+            else {
+                // FIXME missing
+                // errs() << "[DBG] missing global: " << global << "\n";
+            }
+        }
+
+        // arguments
+        for (auto &F : *module) {
+            Function *scope = dyn_cast<Function>(&F);
+
+            for (auto &arg : F.args()) {
+                total_cnt++;
+                auto type = get(scope, &arg);
+                if (type && !type->isOpaque()) {
+                    cover_cnt++;
+                } else {
+                    // FIXME missing
+                    // errs() << "[DBG] missing argument: " << arg << "\n";
+                }
+            }
+            for (auto &BB : F) {
+                for (auto &inst : BB) {
+
+                    if (auto store = dyn_cast<StoreInst>(&inst))
+                        continue;
+
+                    total_cnt++;
+                    auto type = get(scope, dyn_cast<Value>(&inst));
+                    if (type && !type->isOpaque()) {
+                        cover_cnt++;
+                    } else {
+                        // FIXME missing
+                        // errs() << "[DBG] missing inst: " << inst << "\n";
+                    }
+                }
+            }
+        }
+
+        errs() << "[RESULT] total count: " << total_cnt << "\n";
+        errs() << "[RESULT] cover count: " << cover_cnt << "\n";
+        double coverage = (double)cover_cnt / total_cnt;
+
+        ostringstream oss;
+        oss << fixed << std::setprecision(2) << (coverage * 100) << "%";
+        errs() << "[RESULT] coverage: " << oss.str() << "\n";
     }
 
     vector<TypeMap *> getAllMap() {

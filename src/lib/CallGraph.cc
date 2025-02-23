@@ -277,6 +277,7 @@ bool CallGraphPass::doFinalization(Module *M) {
 bool CallGraphPass::doModulePass(Module *M) {
 
 	auto analyzer = new TypeAnalyzer(M);
+	analyzer->init();
 	auto tg = analyzer->analyze();
 
 	++ MIdx;

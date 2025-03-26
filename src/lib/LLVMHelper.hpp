@@ -58,11 +58,7 @@ string di_to_ir_type(string &di_type) {
     return ir_type;
 }
 
-// trim suffixing digits from ir types
-string trim_ir_suffix(string &ir_type) {
-    regex pattern(R"((%struct\.[a-zA-Z_]\w*)\.\d+(\*?))");
-    return regex_replace(ir_type, pattern, "$1$2");
-}
+
 
 class LLVMHelper {
   public:
@@ -139,12 +135,12 @@ class MigrationHelper : public LLVMHelper {
 
         // handle call instruction
         if (auto *call = dyn_cast<CallInst>(&inst)) {
-            type = call->getFunctionType();
+            type = call->getFunctionType()->getReturnType();
 
             // trim parameters' type by erasing parantheses
             auto funcType = tyHelper.getTypeName(type);
-            funcType.erase(funcType.find_first_of('('));
-            funcType.erase(funcType.find_last_of(' '));
+            // funcType.erase(funcType.find_first_of('('));
+            // funcType.erase(funcType.find_last_of(' '));
             return funcType;
         }
 
@@ -608,6 +604,12 @@ class TBAAHelper : public LLVMHelper {
     }
 };
 
+// trim suffixing digits from ir types
+string trim_ir_suffix(StringRef ir_type) {
+    regex pattern(R"((%struct\.[a-zA-Z_]\w*)\.\d+(\*?))");
+    return regex_replace(ir_type.str(), pattern, "$1$2");
+}
+
 class CombHelper : public LLVMHelper {
   private:
     MigrationHelper *migHelper;
@@ -625,38 +627,85 @@ class CombHelper : public LLVMHelper {
         DebugInfoFinder finder;
         finder.processModule(*module);
 
-        for (auto s : module->getIdentifiedStructTypes()) {
-            if (!s->hasName())
-                continue;
-
-            auto structName = s->getName();
-            structName.consume_front("struct.");
-            for (auto type : finder.types()) {
-                // typedef
-                if (auto *derived = dyn_cast<DIDerivedType>(type)) {
-                    if (derived->getTag() == dwarf::DW_TAG_typedef) {
-                        if (derived->getName().equals(structName)) {
-                            structMap.insert({s, derived->getBaseType()});
-                            break;
+        outs() << "[INFO] processing di struct types ...\n";
+        map<string, DIType *> diStructMap;
+        for (auto type : finder.types()) {
+            if (auto *derived = dyn_cast<DIDerivedType>(type)) {
+                if (derived->getTag() == dwarf::DW_TAG_typedef) {
+                    // check if the base type tag is DW_TAG_structure_type
+                    auto base_type = derived->getBaseType();
+                    if (base_type && base_type->getTag() == dwarf::DW_TAG_structure_type) {
+                        auto type_name = derived->getName().str();
+                        if (diStructMap.find(type_name) != diStructMap.end()) {
+                            continue;
                         }
+                        diStructMap[type_name] = type;
                     }
-                }
-                // struct
-                else if (auto *composite = dyn_cast<DICompositeType>(type)) {
-                    if (composite->getTag() == dwarf::DW_TAG_structure_type) {
-                        if (composite->getName().equals(structName)) {
-                            // empty elements, skip
-                            if (composite->getElements().empty())
-                                continue;
-
-                            structMap.insert({s, composite});
-                            break;
-                        }
+                } 
+            }
+            if (auto *composite = dyn_cast<DICompositeType>(type)) {
+                if (composite->getTag() == dwarf::DW_TAG_structure_type) {
+                    auto type_name = composite->getName().str();
+                    if (diStructMap.find(type_name) != diStructMap.end()) {
+                        continue;
                     }
+                    diStructMap[type_name] = type;
                 }
             }
         }
 
+        outs() << "[INFO] di struct types: " << diStructMap.size() << "\n";
+        outs() << "[INFO] processing struct types ...\n";
+        for (auto s : module->getIdentifiedStructTypes()) {
+            if (!s->hasName())
+                continue;
+
+            // trim suffix
+            auto __structName = s->getName();
+            __structName.consume_front("struct.");
+
+            // trim suffixing digits from ir types
+            auto structName = trim_ir_suffix(__structName);
+
+            // search in diStructMap
+            auto di_type_iter = diStructMap.find(structName);
+            if (di_type_iter != diStructMap.end()) {
+                outs() << "[INFO] found struct type: " << structName << "\n";
+                structMap.insert({s, di_type_iter->second});
+                continue;
+            } else {
+                outs() << "[INFO] not found struct type: " << __structName << ", or " << structName << "\n";
+            }
+
+            // for (auto type : finder.types()) {
+            //     // typedef
+            //     if (auto *derived = dyn_cast<DIDerivedType>(type)) {
+            //         if (derived->getTag() == dwarf::DW_TAG_typedef) {
+            //             if (derived->getName().equals(structName)) {
+            //                 outs() << "[INFO] found struct type: " << structName << "\n";
+            //                 structMap.insert({s, derived->getBaseType()});
+            //                 break;
+            //             }
+            //         }
+            //     }
+            //     // struct
+            //     else if (auto *composite = dyn_cast<DICompositeType>(type)) {
+            //         if (composite->getTag() == dwarf::DW_TAG_structure_type) {
+            //             if (composite->getName().equals(structName)) {
+            //                 // empty elements, skip
+            //                 if (composite->getElements().empty())
+            //                     continue;
+
+            //                 outs() << "[INFO] found struct type: " << structName << "\n";
+            //                 structMap.insert({s, composite});
+            //                 break;
+            //             }
+            //         }
+            //     }
+            // }
+        }
+
+        outs() << "[INFO] processing global variables ...\n";
         for (auto &global : module->globals()) {
             SmallVector<DIGlobalVariableExpression *> di_global_exps;
             global.getDebugInfo(di_global_exps);
@@ -684,6 +733,7 @@ class CombHelper : public LLVMHelper {
             }
         }
 
+        outs() << "[INFO] processing local variables ...\n";
         for (auto &func : *module) {
             for (auto &basic_block : func) {
                 for (auto &inst : basic_block) {
@@ -715,6 +765,7 @@ class CombHelper : public LLVMHelper {
             }
         }
 
+        outs() << "[INFO] processing function prototypes ...\n";
         // handle function prototype accurately
         for (auto &func : *module) {
             Value *funcValue = dyn_cast<Value>(&func);

@@ -35,6 +35,7 @@ class WorkList {
     }
 
     void push_user(Value *value) {
+        return;
         for (auto user : value->users()) {
             if (auto inst = dyn_cast<Instruction>(user)) {
                 worklist.push(inst);

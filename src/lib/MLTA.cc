@@ -51,8 +51,21 @@ pair<size_t, int> hashidx_c(size_t Hash, int Idx) {
 	return make_pair(Hash, Idx);
 }
 
-bool MLTA::fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2, 
-		Module *M1, Module *M2) {
+bool MLTA::fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2, bool isRetType) {
+	// outs() << "[DEBUG] fuzzyTypeMatch: Ty1: ";
+	// if (Ty1) {
+	// 	Ty1->dump();
+	// 	outs() << " Ty2: ";
+	// }
+	// if (Ty2) {
+	// 	Ty2->dump();
+	// 	outs() << "\n";
+	// }
+
+	// handle return type
+	if (isRetType && Ty2->isVoid())
+		return true;
+
 	if (!Ty1 || !Ty2)
 		return false;
 
@@ -66,10 +79,10 @@ bool MLTA::fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2,
 
 	if (Ty1->equalByStruct(Ty2))
 		return true;
-	if (Ty1->equalbyInteger(Ty2))
+	if (Ty1->equalByInteger(Ty2))
 		return true;
-	if (Ty1->equalByPointer(Ty2))
-		return true;
+	// if (Ty1->equalByPointer(Ty2))
+		// return true;
 	// TODO: more types to be supported.
 
 	// Make the type analysis conservative: assume general
@@ -139,7 +152,7 @@ void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 			Function *scope = CI->getParent()->getParent();
 			TypeSet *ActualTy = tg->get(scope, *AI);
 			
-			if (!fuzzyTypeMatch(DefinedTy, ActualTy, CalleeM, CallerM)) {
+			if (!fuzzyTypeMatch(DefinedTy, ActualTy, false)) {
 				Matched = false;
 				break;
 			}
@@ -151,7 +164,7 @@ void MLTA::findCalleesWithType(TypeGraph *tg, CallInst *CI, FuncSet &S) {
 			Function *scope = CI->getParent()->getParent();
 			TypeSet *RTy2 = tg->get(scope, CI);
 
-			if (!fuzzyTypeMatch(RTy1, RTy2, CalleeM, CallerM)) {
+			if (!fuzzyTypeMatch(RTy1, RTy2, true)) {
 				Matched = false;
 			}
 		}

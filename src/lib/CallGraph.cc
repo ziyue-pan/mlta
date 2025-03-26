@@ -94,6 +94,27 @@ void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 					MatchedICallSet.insert(CI);
 					Ctx->NumIndirectCallTargets += FS->size();
 					Ctx->NumValidIndirectCalls++;
+				} else {
+					// outs() << "[DEBUG] no callees for " << *CI << "\n";
+					// auto typeset = tg->get(F, CI);
+					// if (typeset) {
+					// 	outs() << "[DEBUG] ret typeset: ";
+					// 	typeset->dump();
+					// 	outs() << "\n";
+					// }
+					// // dump all arguments of CI
+					// for (auto &arg : CI->args()) {
+					// 	outs() << "[DEBUG] arg: " << *arg << "\n";
+					// 	// dump type of arg
+					// 	if (arg) {
+					// 		auto typeset = tg->get(F, arg);
+					// 		if (typeset) {
+					// 			outs() << "[DEBUG] arg typeset: ";
+					// 			typeset->dump();
+					// 			outs() << "\n";
+					// 		}
+					// 	}
+					// }
 				}
 			}
 			// Direct call
@@ -180,7 +201,7 @@ bool CallGraphPass::doInitialization(Module *M) {
 
 		// Collect address-taken functions.
 		// NOTE: declaration functions can also have address taken 
-		if (F.hasAddressTaken()) {
+		if (F.hasAddressTaken() && F.arg_size() > 0) {
 			Ctx->AddressTakenFuncs.insert(&F);
 			size_t FuncHash = funcHash(&F, false);
 			Ctx->sigFuncsMap[FuncHash].insert(&F);
@@ -294,7 +315,6 @@ bool CallGraphPass::doModulePass(Module *M) {
 
 		Type *GTy = GV->getType();
 		assert(GTy->isPointerTy());
-
 	}
 
 	//
@@ -321,7 +341,7 @@ bool CallGraphPass::doModulePass(Module *M) {
 		}
 	}
 	OP << "[TypeCopilot] # of total icall targets: " << unique_target_after.size() << "\n";
-	OP << "[TypeCopilot] avg. # of icall targets: " << total_target / MatchedICallTypeMap.size() << "\n";
+	OP << "[TypeCopilot] avg. # of icall targets: " << double(total_target) / double(MatchedICallTypeMap.size()) << "\n";
 
 	return false;
 }

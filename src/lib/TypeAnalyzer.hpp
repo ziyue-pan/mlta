@@ -88,10 +88,16 @@ class TypeAnalyzer {
         llHelper = combHelper;
 
         // do initialization
-        log("[INFO] initializing ...\n");
+        log("[INFO] allocating TypeGraph ...\n");
         tg = new TypeGraph();
+
+        log("[INFO] initializing llvm type helper ...\n");
         llHelper->initialize(module, tg);
+
+        log("[INFO] initializing WorkList ...\n");
         worklist = new WorkList(module);
+
+        log("[INFO] initializing TypeAlias ...\n");
         alias = new TypeAlias(module, tg, worklist, llHelper);
 
         return tg;
@@ -101,6 +107,7 @@ class TypeAnalyzer {
     // start analysis
     // ==============
     TypeGraph *analyze() {
+        log("[INFO] processing ...\n");
         // do inference
         process();
 

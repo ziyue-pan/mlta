@@ -39,10 +39,7 @@ class WorkList {
         for (auto user : value->users()) {
             if (auto inst = dyn_cast<Instruction>(user)) {
                 worklist.push(inst);
-                // errs() << "[LOG] worklist.add: " << *inst << "\n";
-            } else {
-                // FIXME debug on this non-instruction case
-            }
+            } 
         }
     }
 

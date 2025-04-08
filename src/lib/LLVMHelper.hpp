@@ -627,7 +627,6 @@ class CombHelper : public LLVMHelper {
         DebugInfoFinder finder;
         finder.processModule(*module);
 
-        outs() << "[INFO] processing di struct types ...\n";
         map<string, DIType *> diStructMap;
         for (auto type : finder.types()) {
             if (auto *derived = dyn_cast<DIDerivedType>(type)) {
@@ -654,8 +653,6 @@ class CombHelper : public LLVMHelper {
             }
         }
 
-        outs() << "[INFO] di struct types: " << diStructMap.size() << "\n";
-        outs() << "[INFO] processing struct types ...\n";
         for (auto s : module->getIdentifiedStructTypes()) {
             if (!s->hasName())
                 continue;
@@ -670,19 +667,15 @@ class CombHelper : public LLVMHelper {
             // search in diStructMap
             auto di_type_iter = diStructMap.find(structName);
             if (di_type_iter != diStructMap.end()) {
-                outs() << "[INFO] found struct type: " << structName << "\n";
                 structMap.insert({s, di_type_iter->second});
                 continue;
-            } else {
-                outs() << "[INFO] not found struct type: " << __structName << ", or " << structName << "\n";
-            }
+            } 
 
             // for (auto type : finder.types()) {
             //     // typedef
             //     if (auto *derived = dyn_cast<DIDerivedType>(type)) {
             //         if (derived->getTag() == dwarf::DW_TAG_typedef) {
             //             if (derived->getName().equals(structName)) {
-            //                 outs() << "[INFO] found struct type: " << structName << "\n";
             //                 structMap.insert({s, derived->getBaseType()});
             //                 break;
             //             }
@@ -696,7 +689,6 @@ class CombHelper : public LLVMHelper {
             //                 if (composite->getElements().empty())
             //                     continue;
 
-            //                 outs() << "[INFO] found struct type: " << structName << "\n";
             //                 structMap.insert({s, composite});
             //                 break;
             //             }
@@ -705,7 +697,6 @@ class CombHelper : public LLVMHelper {
             // }
         }
 
-        outs() << "[INFO] processing global variables ...\n";
         for (auto &global : module->globals()) {
             SmallVector<DIGlobalVariableExpression *> di_global_exps;
             global.getDebugInfo(di_global_exps);
@@ -733,7 +724,6 @@ class CombHelper : public LLVMHelper {
             }
         }
 
-        outs() << "[INFO] processing local variables ...\n";
         for (auto &func : *module) {
             for (auto &basic_block : func) {
                 for (auto &inst : basic_block) {
@@ -765,7 +755,6 @@ class CombHelper : public LLVMHelper {
             }
         }
 
-        outs() << "[INFO] processing function prototypes ...\n";
         // handle function prototype accurately
         for (auto &func : *module) {
             Value *funcValue = dyn_cast<Value>(&func);

@@ -94,28 +94,7 @@ void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 					MatchedICallSet.insert(CI);
 					Ctx->NumIndirectCallTargets += FS->size();
 					Ctx->NumValidIndirectCalls++;
-				} else {
-					// outs() << "[DEBUG] no callees for " << *CI << "\n";
-					// auto typeset = tg->get(F, CI);
-					// if (typeset) {
-					// 	outs() << "[DEBUG] ret typeset: ";
-					// 	typeset->dump();
-					// 	outs() << "\n";
-					// }
-					// // dump all arguments of CI
-					// for (auto &arg : CI->args()) {
-					// 	outs() << "[DEBUG] arg: " << *arg << "\n";
-					// 	// dump type of arg
-					// 	if (arg) {
-					// 		auto typeset = tg->get(F, arg);
-					// 		if (typeset) {
-					// 			outs() << "[DEBUG] arg typeset: ";
-					// 			typeset->dump();
-					// 			outs() << "\n";
-					// 		}
-					// 	}
-					// }
-				}
+				} 
 			}
 			// Direct call
 			else {

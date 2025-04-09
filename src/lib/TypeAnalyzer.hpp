@@ -76,7 +76,6 @@ class TypeAnalyzer {
         CombHelper *combHelper = new CombHelper();
 
         if (!combHelper->hasDebugInfo(*module)) {
-            errs() << "[ERR] no debug info found\n";
             return nullptr;
         }
 

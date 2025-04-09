@@ -117,7 +117,6 @@ class TypeAlias {
                     baseType = vectorType->getElementType();
                 } else {
                     // should not reach here
-                    errs() << "[ERR] unknown type: ";
                     baseType->dump();
                 }
             } else {
@@ -127,7 +126,6 @@ class TypeAlias {
                     baseType = vectorType->getElementType();
                 } else {
                     // should not reach here
-                    errs() << "[ERR] unknown index: ";
                     index->dump();
                     exit(1);
                 }

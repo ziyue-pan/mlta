@@ -86,6 +86,65 @@ class TypeSet {
                     return true;
             }
         }
+        return __equalsLinux(given);
+    }
+
+    bool __equalsLinux(TypeSet *given) {
+        if (given->size() == 1 && given->at(0) == "%struct.list_head") {
+            return true;
+        }
+
+        if (given->size() == 1 && given->at(0) == "%struct._Bool") {
+            for (auto it = types.begin(); it != types.end(); it++) {
+                string type = *it;
+                while (type.back() == '*')
+                    type.pop_back();
+                if (type == "i1")
+                    return true;
+            }
+        }
+
+        if (given->size() == 1 && given->at(0) == "i32") {
+            for (auto it = types.begin(); it != types.end(); it++) {
+                string type = *it;
+                while (type.back() == '*')
+                    type.pop_back();
+                if (type == "%struct.")
+                    return true;
+                if (type == "%struct.seqcount_spinlock" || type == "%struct.seqcount")
+                    return true;
+            }
+        }
+
+        if (given->size() == 1 && given->at(0) == "i64") {
+            for (auto it = types.begin(); it != types.end(); it++) {
+                string type = *it;
+                while (type.back() == '*')
+                    type.pop_back();
+                if (type == "i32")
+                    return true;
+                if (type == "%struct.")
+                    return true;
+                if (type == "void")
+                    return true;
+                if (type == "%struct.boot_params_to_save")
+                    return true;
+            }
+        }
+
+        if (given->size() == 1 &&
+            (given->at(0) == "i32" || given->at(0) == "i64")) {
+            for (auto it = types.begin(); it != types.end(); it++) {
+                if (it->find("union.") != string::npos)
+                    return true;
+                if (*it == "void*")
+                    return true;
+            }
+        }
+
+        if (given->size() == 1 && given->at(0) == "%struct.dentry") {
+            return true;
+        }
         return false;
     }
 
@@ -121,13 +180,6 @@ class TypeSet {
     bool isVoid() { return types.count("void"); }
 
     bool equalByStruct(TypeSet *other) {
-        // outs() << "[DEBUG] reach equalByStruct\n";
-        // outs() << "[DEBUG] this: ";
-        // dump();
-        // outs() << "\n[DEBUG] other: ";
-        // other->dump();
-        // outs() << "\n";
-        
         if (!isStructTy() || !other->isStructTy())
             return false;
 
@@ -146,7 +198,6 @@ class TypeSet {
                             continue;
                         }
 
-                        outs() << "[DEBUG] equalByStruct: " << *it1 << " == " << *it2 << "\n";
                         return true;
                     }
         }
@@ -155,13 +206,6 @@ class TypeSet {
     }
 
     bool equalByInteger(TypeSet *other) {
-        // outs() << "[DEBUG] reach equalByInteger\n";
-        // outs() << "[DEBUG] this: ";
-        // dump();
-        // outs() << "\n[DEBUG] other: ";
-        // other->dump();
-        // outs() << "\n----";
-
         for (auto it1 = types.begin(); it1 != types.end(); it1++)
             for (auto it2 = other->types.begin(); it2 != other->types.end(); it2++) {
                 if (!isIntegerTy(*it1) || !isIntegerTy(*it2))
@@ -171,12 +215,6 @@ class TypeSet {
                 int size2 = integerSize(*it2);
                 
                 if (size1 != 0 && size2 != 0 && size1 == size2) {
-                    // outs() << "[DEBUG] equalByInteger: " << *it1 << " == " << *it2 << "\n";
-                    return true;
-                }
-
-                if ((size1 == 32 && size2 == 64) || (size1 == 64 && size2 == 32)) {
-                    outs() << "[DEBUG] equalByInteger: " << *it1 << " == " << *it2 << "\n";
                     return true;
                 }
             }
@@ -213,13 +251,6 @@ class TypeSet {
     }
 
     bool equalByPointer(TypeSet *other) {
-        // outs() << "[DEBUG] reach equalByPointer\n";
-        // outs() << "[DEBUG] this: ";
-        // dump();
-        // outs() << "\n[DEBUG] other: ";
-        // other->dump();
-        // outs() << "\n";
-
         return isPointerTy() && other->isPointerTy();
     }
 };

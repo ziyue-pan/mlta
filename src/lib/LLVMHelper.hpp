@@ -455,7 +455,6 @@ class DebugInfoHelper : public LLVMHelper {
             name = subroutine->getName();
         } break;
         default:
-            errs() << "[ERR] should handle " << tag << "\n";
             break;
         }
 

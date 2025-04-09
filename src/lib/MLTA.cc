@@ -52,16 +52,6 @@ pair<size_t, int> hashidx_c(size_t Hash, int Idx) {
 }
 
 bool MLTA::fuzzyTypeMatch(TypeSet *Ty1, TypeSet *Ty2, bool isRetType) {
-	// outs() << "[DEBUG] fuzzyTypeMatch: Ty1: ";
-	// if (Ty1) {
-	// 	Ty1->dump();
-	// 	outs() << " Ty2: ";
-	// }
-	// if (Ty2) {
-	// 	Ty2->dump();
-	// 	outs() << "\n";
-	// }
-
 	// handle return type
 	if (isRetType && Ty2->isVoid())
 		return true;

@@ -112,7 +112,6 @@ class TypeGraph {
 
         if (old) {
             // filter out ptr* type
-            // FIXME delete stale debug stuff
             if (DEBUG && to_add->count("ptr**")) {
                 key->dump();
                 errs() << "current type: ";
@@ -314,10 +313,6 @@ class TypeGraph {
             auto type = get(nullptr, v);
             if (type && !type->isOpaque())
                 cover_cnt++;
-            else {
-                // FIXME missing
-                // errs() << "[DBG] missing global: " << global << "\n";
-            }
         }
 
         // arguments
@@ -329,10 +324,7 @@ class TypeGraph {
                 auto type = get(scope, &arg);
                 if (type && !type->isOpaque()) {
                     cover_cnt++;
-                } else {
-                    // FIXME missing
-                    // errs() << "[DBG] missing argument: " << arg << "\n";
-                }
+                } 
             }
             for (auto &BB : F) {
                 for (auto &inst : BB) {
@@ -344,10 +336,7 @@ class TypeGraph {
                     auto type = get(scope, dyn_cast<Value>(&inst));
                     if (type && !type->isOpaque()) {
                         cover_cnt++;
-                    } else {
-                        // FIXME missing
-                        // errs() << "[DBG] missing inst: " << inst << "\n";
-                    }
+                    } 
                 }
             }
         }

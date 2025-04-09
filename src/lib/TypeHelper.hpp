@@ -138,52 +138,5 @@ class TypeHelper {
         }
 
         errs() << "total: " << cnt << "\n";
-
-        return;
-        // FIXME delete the following
-
-        vector<string> libFuncs{
-            "gettext",          "fopen",          "calloc",
-            "localtime",        "strchr",         "gmtime_r",
-            "malloc",           "__ctype_b_loc",  "reallocarray",
-            "__errno_location", "getenv",         "textdomain",
-            "setlocale",        "bindtextdomain", "realloc",
-            "nl_langinfo"};
-
-        for (auto typeMap : tg->getAllMap()) {
-            for (auto &[key, value] : *typeMap) {
-                if (value->isOpaque()) {
-                    bool isLibFunc = false;
-                    for (auto libFunc : libFuncs) {
-                        // declare
-                        if (key->getName().contains(libFunc)) {
-                            isLibFunc = true;
-                            break;
-                        }
-                    }
-                    if (isLibFunc) {
-                        continue;
-                    }
-
-                    errs() << "[INFO] opaque value:\n";
-                    key->dump();
-
-                    continue;
-
-                    if (auto *inst = dyn_cast<Instruction>(key)) {
-                        errs() << "operands:\n";
-                        for (auto &operand : inst->operands()) {
-                            operand->dump();
-                        }
-                    }
-
-                    errs() << "users:\n";
-                    for (auto user : key->users()) {
-                        user->dump();
-                    }
-                    errs() << "\n";
-                }
-            }
-        }
     }
 };

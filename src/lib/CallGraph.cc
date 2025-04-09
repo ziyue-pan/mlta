@@ -94,28 +94,7 @@ void CallGraphPass::doMLTA(TypeGraph* tg, Function *F) {
 					MatchedICallSet.insert(CI);
 					Ctx->NumIndirectCallTargets += FS->size();
 					Ctx->NumValidIndirectCalls++;
-				} else {
-					// outs() << "[DEBUG] no callees for " << *CI << "\n";
-					// auto typeset = tg->get(F, CI);
-					// if (typeset) {
-					// 	outs() << "[DEBUG] ret typeset: ";
-					// 	typeset->dump();
-					// 	outs() << "\n";
-					// }
-					// // dump all arguments of CI
-					// for (auto &arg : CI->args()) {
-					// 	outs() << "[DEBUG] arg: " << *arg << "\n";
-					// 	// dump type of arg
-					// 	if (arg) {
-					// 		auto typeset = tg->get(F, arg);
-					// 		if (typeset) {
-					// 			outs() << "[DEBUG] arg typeset: ";
-					// 			typeset->dump();
-					// 			outs() << "\n";
-					// 		}
-					// 	}
-					// }
-				}
+				} 
 			}
 			// Direct call
 			else {
@@ -331,7 +310,6 @@ bool CallGraphPass::doModulePass(Module *M) {
 		doMLTA(tg, F);
 	}
 
-	OP << "[TypeCopilot] # of icall: " << MatchedICallTypeMap.size() << "\n";
 	int total_target = 0;
 	set<Function *> unique_target_after;
 	for (auto &CI : MatchedICallTypeMap) {
@@ -340,8 +318,6 @@ bool CallGraphPass::doModulePass(Module *M) {
 			unique_target_after.insert(F);
 		}
 	}
-	OP << "[TypeCopilot] # of total icall targets: " << unique_target_after.size() << "\n";
-	OP << "[TypeCopilot] avg. # of icall targets: " << double(total_target) / double(MatchedICallTypeMap.size()) << "\n";
 
 	return false;
 }
